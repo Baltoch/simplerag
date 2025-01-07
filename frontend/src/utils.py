@@ -1,120 +1,76 @@
-from bs4 import BeautifulSoup
-import requests
 import os
-import json
-import re
 from PyPDF2 import PdfReader
 import streamlit as st
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
-from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import JSONLoader
-from langchain_chroma import Chroma
 from langchain.load import dumps, loads
+import chromadb
+import chromadb.utils.embedding_functions as embedding_functions
 
 @st.cache_resource
-def get_doc_vectorstore():
-    """
-    Returns a Chroma vector store as output
-    """
-    return Chroma(collection_name="langchain_store", embedding_function=OllamaEmbeddings(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}'))
+def get_chroma_collection():
+    st.session_state.documents = []
+    return  chromadb.Client().create_collection(name="simplerag", embedding_function=embedding_functions.OllamaEmbeddingFunction(model_name="llama3.2", url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}/api/embeddings'))
 
-def add_documents_from_text(text, vectorstore):
+def add_chroma_document(name, text, collection):
     """
-    Add documents to the vector store from a string.
+    Add document separated by chunks to the Chroma vector store.
     
     Args:
+    name (str): the name of the document to add to the vector store.
     text (str): the text content of the document to add to the vector store.
-    vectorstore (Chroma): The Chroma vector store.
+    collection (Chroma): The Chroma vector store.
     
     Returns:
     None
     """
     # Split the text into chunks
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=250)
-    documents = [Document(page_content=chunk) for chunk in splitter.split_text(text)]
+    documents = [chunk for chunk in splitter.split_text(text)]
 
     # Add the documents to the vector store
-    vectorstore.add_documents(documents)
+    collection.add(documents=documents, ids=[f"{name}-{i}" for i in range(len(documents))], metadatas=[{"document": name} for _ in documents])
 
-def get_unique_docs(documents: list[list]):
-    """ Unique union of retrieved docs """
-    # Flatten list of lists, and convert each Document to string
-    flattened_docs = [dumps(doc) for sublist in documents for doc in sublist]
-    # Get unique documents
-    unique_docs = list(set(flattened_docs))
-    # Return
-    return [loads(doc) for doc in unique_docs]
+    # Update the list of uploaded documents
+    st.session_state.documents.append(name)
 
-def generate_step_back_query(original_query):
+def remove_chroma_document(name, collection):
     """
-    Generate a step-back query to retrieve broader context.
-    """
-    model = ChatOllama(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}', temperature=0)
-
-    step_back_template = """You are an AI assistant tasked with generating broader, more general queries to improve context retrieval in a RAG system.
-    Given the original query, generate a step-back query that is more general and can help retrieve relevant background information.
-    
-    Original query: {original_query}
-    
-    Step-back query:"""
-
-    step_back_prompt = PromptTemplate.from_template(step_back_template)
-
-    # Create an LLMChain for step-back prompting
-    # step_back_chain = step_back_prompt | model | StrOutputParser
-    prompt = step_back_prompt.invoke(original_query)
-    resp = model.invoke(prompt)
-    out = StrOutputParser.invoke(self=StrOutputParser(), input=resp)
-    return out
-
-def decompose_query_with_step_back(original_query: str):
-    """
-    Decompose the original query into simpler sub-queries.
+    Remove document from the Chroma vector store.
     
     Args:
-    original_query (str): The original complex query
+    name (str): the name of the document to remove from the vector store.
+    collection (Chroma): The Chroma vector store.
     
     Returns:
-    List[str]: A list of simpler sub-queries
+    None
     """
-    original_query = generate_step_back_query(original_query)
-    model = ChatOllama(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}', temperature=0, max_tokens=4000)
+    # Remove the document from the vector store
+    collection.delete(where={"document": name})
 
-    # Create a prompt template for sub-query decomposition
-    subquery_decomposition_template = """You are an AI assistant tasked with breaking down complex queries into simpler sub-queries for a RAG system.
-    Given the original query, decompose it into 2-4 simpler sub-queries that, when answered together, would provide a comprehensive response to the original query.
-    
-    Original query: {original_query}
-    
-    example: What are the impacts of climate change on the environment?
-    
-    Sub-queries:
-    1. What are the impacts of climate change on biodiversity?
-    2. How does climate change affect the oceans?
-    3. What are the effects of climate change on agriculture?
-    4. What are the impacts of climate change on human health?"""
+    # Update the list of uploaded documents
+    st.session_state.documents.remove(name)
 
-    subquery_decomposition_prompt = PromptTemplate.from_template(subquery_decomposition_template)
-    
-    # Create an LLMChain for sub-query decomposition
-    subquery_decomposer_chain = subquery_decomposition_prompt | model
-
-    response = subquery_decomposer_chain.invoke(original_query).content
-    sub_queries = [q.strip() for q in response.split('\n') if q.strip() and not q.strip().startswith('Sub-queries:')]
-    return sub_queries
-
-def retrieve_documents(query, retriever):
+def query_chroma(query, collection, n_results=5):
     """
-    Takes a query as input
-    Returns the top 5 most relevant document chunks as outputs
+    Query the Chroma vector store.
+    
+    Args:
+    query (str or list[str]): the query to search for in the vector store.
+    collection (Chroma): The Chroma vector store.
+    n_results (int): the number of results to return.
+    
+    Returns:
+    List[str]: A list of document names that match the query.
     """
-    retrieval_chain = decompose_query_with_step_back | retriever.map() | get_unique_docs
-    documents = retrieval_chain.invoke(query)
-    vectorstore = Chroma.from_documents(documents=documents, embedding=OllamaEmbeddings(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}'))
-    return vectorstore.similarity_search(query, 5)
+    st.warning(query)
+    if type(query) == str:
+        query = [query]
+    out = collection.query(query_texts=query, n_results=n_results, include=["documents"])
+    st.warning(out)
+    return out
 
 class Question:
     def __init__(self, question: str, answer: str):
@@ -147,14 +103,13 @@ class LastQuestions:
             out += " --- \n"
         return out
 
-def response_generation(question, last_questions, retriever):
+def response_generation(question, last_questions, collection):
     """
     Cette fonction prend une requête en entrée et retourne la réponse finale.
     """
     try:
-        st.warning("ChatOllama base_url: " + f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}')
         # Document Context
-        context = retrieve_documents(question, retriever)
+        context = query_chroma(query=question, collection=collection)
         
         # Prompt
         template = """Here is the question you need to answer:

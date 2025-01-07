@@ -4,9 +4,6 @@ streamlit
 langchain
 langchain_core
 langchain_ollama
-langchain_community
 jq
 chromadb
-langchain_chroma
 PyPDF2
-ollama==0.4.2
