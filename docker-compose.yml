@@ -11,9 +11,12 @@ services:
       - LLM_HOST=${LLM_HOST}
       - LLM_PORT=${LLM_PORT}
       - OCR_URL=${OCR_URL}
+      - VECTOR_DB_HOST=${VECTOR_DB_HOST}
+      - VECTOR_DB_PORT=${VECTOR_DB_PORT}
     depends_on:
       - llm
       - ocr
+      - vectordb
 
   llm:
     build:
@@ -39,6 +42,16 @@ services:
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
       - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT}
       - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT} 
+
+  vectordb:
+    image: chromadb/chroma
+    # build:
+    #   context: ./vectordb
+    #   dockerfile: Dockerfile
+    ports:
+      - 8000:8000
+    environment:
+      - VECTOR_DB_PORT=${VECTOR_DB_PORT}
 
 volumes:
   ollama-data:

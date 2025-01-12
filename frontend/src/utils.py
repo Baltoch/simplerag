@@ -1,18 +1,18 @@
 import os
 from PyPDF2 import PdfReader
 import streamlit as st
-from langchain_ollama import ChatOllama
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.load import dumps, loads
+import requests
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 
 @st.cache_resource
 def get_chroma_collection():
-    st.session_state.documents = []
-    return  chromadb.Client().create_collection(name="simplerag", embedding_function=embedding_functions.OllamaEmbeddingFunction(model_name="llama3.2", url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}/api/embeddings'))
+    return chromadb.HttpClient(host=os.environ.get("VECTOR_DB_HOST"), port=os.environ.get("VECTOR_DB_PORT")).get_or_create_collection(name="simplerag") 
 
 def add_chroma_document(name, text, collection):
     """
@@ -30,8 +30,12 @@ def add_chroma_document(name, text, collection):
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=250)
     documents = [chunk for chunk in splitter.split_text(text)]
 
+    # Create embeddings for the documents
+    embeddings = OllamaEmbeddings(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}')
+    documents_embeddings = embeddings.embed_documents(documents)
+
     # Add the documents to the vector store
-    collection.add(documents=documents, ids=[f"{name}-{i}" for i in range(len(documents))], metadatas=[{"document": name} for _ in documents])
+    collection.add(documents=documents, embeddings=documents_embeddings, ids=[f"{name}-{i}" for i in range(len(documents))], metadatas=[{"document": name} for _ in documents])
 
     # Update the list of uploaded documents
     st.session_state.documents.append(name)
@@ -65,11 +69,12 @@ def query_chroma(query, collection, n_results=5):
     Returns:
     List[str]: A list of document names that match the query.
     """
-    st.warning(query)
     if type(query) == str:
         query = [query]
-    out = collection.query(query_texts=query, n_results=n_results, include=["documents"])
-    st.warning(out)
+    
+    embeddings = OllamaEmbeddings(model="llama3.2", base_url=f'http://{os.environ.get("LLM_HOST")}:{os.environ.get("LLM_PORT")}')
+    query_embeddings = embeddings.embed_documents(query)
+    out = collection.query(query_texts=query, query_embeddings=query_embeddings, n_results=n_results, include=["documents"])
     return out
 
 class Question:
@@ -162,3 +167,47 @@ def extract_text_from_pdf(pdf_file):
     for page in reader.pages:
         text += page.extract_text()
     return text
+
+@st.dialog("Upload a document")
+def upload_file(chroma_collection):
+    uploaded_file = st.file_uploader("file upload", type=["jpg", "png", "pdf", "txt", "md"], label_visibility="hidden")
+    with st.container():
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Upload"):
+                if uploaded_file is None:
+                    st.warning("No file selected.")
+                else:
+                    # Handle different file types
+                    if uploaded_file.type in ["image/jpeg", "image/png"]:
+                        try:
+                            # Send the image to the Express.js server
+                            response = requests.post(
+                                url=os.environ.get("OCR_URL"),
+                                headers={"Content-Type": uploaded_file.type},
+                                data=uploaded_file.getvalue(),
+                            )
+
+                            # Handle the server response
+                            if response.status_code == 200:
+                                add_chroma_document(name=uploaded_file.name, text=response.text, collection=chroma_collection)
+                            else:
+                                st.error(f"File upload failed: {response.status_code} - {response.text}")
+
+                        except Exception as e:
+                            st.error(f"An error occurred: {e}")
+
+                    elif uploaded_file.type == "application/pdf":
+                        # Extract text from the uploaded PDF
+                        add_chroma_document(name=uploaded_file.name, text=extract_text_from_pdf(uploaded_file), collection=chroma_collection)
+
+                    elif (uploaded_file.type == "text/plain") or (uploaded_file.type == "text/markdown"):
+                        # Extract text from the uploaded TXT or MD file
+                        add_chroma_document(name=uploaded_file.name, text=uploaded_file.getvalue().decode(), collection=chroma_collection)
+
+                    else:
+                        st.warning("Unsupported file type. Please upload JPG, PNG, PDF, TXT, or MD.")
+                    st.rerun()
+        with col2:
+            if st.button("Cancel"):
+                st.rerun()

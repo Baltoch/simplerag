@@ -47,13 +47,13 @@ app.post('/', (req, res) => {
                 console.log(`error: ${error.message}`);
                 res.status(500).send(error.message);
             }
+            else if (stdout) {
+                console.log(`stdout: ${stdout}`);
+                res.status(200).send(stdout);
+            }
             else if (stderr) {
                 console.log(`stderr: ${stderr}`);
                 res.status(500).send(stderr);
-            }
-            else {
-                console.log(`stdout: ${stdout}`);
-                res.status(200).send(stdout);
             }
         });
         tesseract.on('close', (code) => {

@@ -1,37 +1,45 @@
-# 💬 GenAI Chat
+# 💬 Simple RAG
+
+This project is a simple chatbot that uses Ollama, Tesseract OCR and ChromaDB to generate contextualized answers from provided documents.
+The full stack runs locally on your machine, so it may be slow when running on lighter hardware configurations.
+
+### Prerequisites
+
+To run this project, you need to have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your machine (follow the links for more information).
+
+You can also install [Docker Desktop](https://docs.docker.com/desktop/) instead, which includes Docker and Docker Compose by default.
+
+To check if Docker is running, open a terminal and run the following command :
+
+```bash
+> docker -v
+```
+
+If Docker is running, you should see the version number displayed.
 
 ### Getting Started
 
-First edit the .env file by filling in your API keys :
-
-```
-# Clé API OpenAI
-OPENAI_API_KEY=<Your OpenAI key> <-- Edit here
-
-# Clé API LangSmith
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=<Your EU LangSmith key> <-- Edit here
-LANGCHAIN_ENDPOINT=https://eu.api.smith.langchain.com
-LANGCHAIN_PROJECT=lab8-chatbot
-```
-
-Optionally you can setup and start a Python venv :
+Clone the repository and navigate to the project directory :
 
 ```bash
-> python -m venv ./venv
-> ./venv/Scripts/activate
+> git clone https://github.com/Baltoch/simplerag.git
+> cd simplerag
 ```
 
-You need to install dependencies :
+Edit the .env.sample file by saving it as .env (the values are pre-filled with the default values)
+
+Then, launch the project :
 
 ```bash
-> pip install -r requirements.txt
-```
-
-You can then launch the script :
-
-```bash
-> streamlit run .\\main.py
+> docker compose up -d
 ```
 
 You can now enjoy the [web interface](http://localhost:8501)
+
+### Stopping the Project
+
+If you want to stop the project, run the following command :
+
+```bash
+> docker compose down
+```

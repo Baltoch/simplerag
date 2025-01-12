@@ -9,6 +9,8 @@ RUN apt update && \
     apt-get install -y tesseract-ocr=5.3.0-2
 RUN tesseract -v
 
+COPY ./fra.traineddata /usr/share/tesseract-ocr/5/tessdata/
+
 # Create the /app directory
 RUN mkdir /app
 RUN mkdir ${FILE_DIRECTORY}

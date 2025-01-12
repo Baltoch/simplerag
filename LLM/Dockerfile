@@ -18,6 +18,7 @@ RUN curl -fsSL https://ollama.com/install.sh | bash
 RUN nohup ollama serve & \ 
     sleep 5 && \
     ollama pull llama3.2 && \
+    ollama pull nomic-embed-text && \
     pkill ollama
 
 # Expose the default port for Ollama server
