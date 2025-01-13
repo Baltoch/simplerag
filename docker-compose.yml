@@ -45,9 +45,6 @@ services:
 
   vectordb:
     image: chromadb/chroma
-    # build:
-    #   context: ./vectordb
-    #   dockerfile: Dockerfile
     ports:
       - 8000:8000
     environment:
